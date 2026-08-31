@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anime onlayn ko'rish</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    background: #0e0e16;
+    color: #fff;
+    font-family: -apple-system, Roboto, sans-serif;
+    margin: 0;
+    padding: 16px;
+  }
+  h1 { font-size: 19px; margin: 4px 0 12px; }
+  .ep-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .ep-btn {
+    background: #23233a;
+    border: none;
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .ep-btn.active { background: #5865f2; }
+  video {
+    width: 100%;
+    border-radius: 12px;
+    margin-top: 12px;
+    background: #000;
+  }
+  .empty { opacity: 0.6; margin-top: 40px; text-align: center; }
+</style>
+</head>
+<body>
+  <h1 id="title">Yuklanmoqda...</h1>
+  <div class="ep-list" id="episodes"></div>
+  <video id="player" controls playsinline></video>
+
+<script>
+  const tg = window.Telegram?.WebApp;
+  tg?.ready();
+  tg?.expand();
+
+  const params = new URLSearchParams(window.location.search);
+  const animeId = params.get("anime_id");
+
+  async function load() {
+    if (!animeId) {
+      document.getElementById("title").textContent = "Anime tanlanmagan";
+      return;
+    }
+    const res = await fetch(`/api/anime/${animeId}`);
+    if (!res.ok) {
+      document.getElementById("title").textContent = "Anime topilmadi";
+      return;
+    }
+    const data = await res.json();
+    document.getElementById("title").textContent = data.name;
+
+    const list = document.getElementById("episodes");
+    if (!data.episodes.length) {
+      list.innerHTML = '<div class="empty">Hozircha qismlar yo\'q</div>';
+      return;
+    }
+
+    data.episodes.forEach((ep, i) => {
+      const btn = document.createElement("button");
+      btn.className = "ep-btn" + (i === 0 ? " active" : "");
+      btn.textContent = ep.episode_number + "-qism";
+      btn.onclick = () => {
+        document.querySelectorAll(".ep-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        playEpisode(ep.id);
+      };
+      list.appendChild(btn);
+    });
+
+    playEpisode(data.episodes[0].id);
+  }
+
+  function playEpisode(episodeId) {
+    const player = document.getElementById("player");
+    player.src = `/api/stream/${episodeId}`;
+    player.play().catch(() => {});
+  }
+
+  load();
+</script>
+</body>
+  </html>
