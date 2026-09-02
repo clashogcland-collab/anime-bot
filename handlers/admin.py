@@ -1,7 +1,7 @@
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import database as db
 from config import config
@@ -39,19 +39,26 @@ async def add_anime_name(message: Message, state: FSMContext):
 async def add_anime_description(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
     await state.set_state(AddAnime.poster)
-    await message.answer("Anime uchun poster (rasm) yuboring:")
+    await message.answer("Anime uchun poster yuboring — rasm yoki video bo'lishi mumkin:")
 
 
 @router.message(AddAnime.poster, F.photo)
-async def add_anime_poster(message: Message, state: FSMContext):
-    await state.update_data(poster_file_id=message.photo[-1].file_id)
+async def add_anime_poster_photo(message: Message, state: FSMContext):
+    await state.update_data(poster_file_id=message.photo[-1].file_id, poster_type="photo")
+    await state.set_state(AddAnime.genre)
+    await message.answer("Janrini yuboring (masalan: Aksiya, Fantastika):")
+
+
+@router.message(AddAnime.poster, F.video)
+async def add_anime_poster_video(message: Message, state: FSMContext):
+    await state.update_data(poster_file_id=message.video.file_id, poster_type="video")
     await state.set_state(AddAnime.genre)
     await message.answer("Janrini yuboring (masalan: Aksiya, Fantastika):")
 
 
 @router.message(AddAnime.poster)
 async def add_anime_poster_invalid(message: Message):
-    await message.answer("Iltimos, rasm (poster) yuboring.")
+    await message.answer("Iltimos, rasm yoki video (poster) yuboring.")
 
 
 @router.message(AddAnime.genre)
@@ -61,9 +68,42 @@ async def add_anime_genre(message: Message, state: FSMContext):
         name=data["name"],
         description=data["description"],
         poster_file_id=data["poster_file_id"],
+        poster_type=data.get("poster_type", "photo"),
         genre=data["genre"],
     )
     await state.clear()
+
+    # Kanalga faqat anime birinchi marta qo'shilganda, bitta post qilinadi —
+    # keyingi qismlar qo'shilganda qayta post qilinmaydi.
+    if config.main_channel:
+        bot_username = (await message.bot.get_me()).username
+        hashtag = "#" + data["name"].replace(" ", "").replace("-", "")
+        caption = (
+            f"🎬 <b>{data['name']}</b>\n\n"
+            f"{data['description'] or ''}\n\n"
+            f"🎭 Janr: {data['genre']}\n\n"
+            f"{hashtag} #Anime #AnimeHub"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="🎬 Ko'rish",
+                url=f"https://t.me/{bot_username}?start=anime_{anime_id}",
+            )
+        ]])
+        try:
+            if data.get("poster_type") == "video":
+                await message.bot.send_video(
+                    config.main_channel, data["poster_file_id"],
+                    caption=caption, reply_markup=kb, parse_mode="HTML",
+                )
+            else:
+                await message.bot.send_photo(
+                    config.main_channel, data["poster_file_id"],
+                    caption=caption, reply_markup=kb, parse_mode="HTML",
+                )
+        except Exception as e:
+            await message.answer(f"⚠️ Kanalga post joylashda xatolik: {e}")
+
     await message.answer(
         f"✅ Anime qo'shildi! ID: {anime_id}\n"
         f"Endi /add_episode orqali qismlarini qo'shishingiz mumkin."
@@ -115,6 +155,7 @@ async def add_episode_video(message: Message, state: FSMContext):
         await message.answer("Xatolik: anime topilmadi. Qaytadan /add_episode bosing.")
         return
 
+    # Videoni saqlash kanaliga forward qilamiz — asl fayl Telegram serverida saqlanib qoladi.
     forwarded = await message.forward(config.storage_channel_id)
     file_id = message.video.file_id if message.video else message.document.file_id
 
@@ -125,26 +166,11 @@ async def add_episode_video(message: Message, state: FSMContext):
         storage_message_id=forwarded.message_id,
     )
 
-    if config.main_channel:
-        bot_username = (await message.bot.get_me()).username
-        caption = (
-            f"🎬 <b>{anime['name']}</b>\n"
-            f"{data['episode_number']}-qism qo'shildi!\n\n"
-            f"👉 Ko'rish: https://t.me/{bot_username}?start=anime_{anime['id']}"
-        )
-        try:
-            if anime["poster_file_id"]:
-                await message.bot.send_photo(
-                    config.main_channel, anime["poster_file_id"], caption=caption, parse_mode="HTML"
-                )
-            else:
-                await message.bot.send_message(config.main_channel, caption, parse_mode="HTML")
-        except Exception as e:
-            await message.answer(f"⚠️ Kanalga post joylashda xatolik: {e}")
-
+    # Qism qo'shilganda kanalga qayta post QILINMAYDI — faqat botdagi
+    # menyuga qo'shiladi (kanal posti faqat anime birinchi yaratilganda ketadi).
     await state.clear()
     await message.answer(
-        f"✅ {data['episode_number']}-qism qo'shildi, menyuga qo'shildi va kanalga e'lon qilindi!\n"
+        f"✅ {data['episode_number']}-qism qo'shildi va menyuga qo'shildi!\n"
         f"Yana qo'shish uchun /add_episode"
     )
     _ = episode_id
