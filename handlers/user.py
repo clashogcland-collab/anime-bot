@@ -18,13 +18,15 @@ async def _render_anime_detail(message: Message, anime_id: int):
     episodes = await db.get_episodes(anime_id)
     caption = (
         f"<b>{anime['name']}</b>\n\n"
-        f"{anime['description'] or ''}\n\n"
         f"Janr: {anime['genre'] or '-'}\n"
         f"Holat: {anime['status']}\n"
         f"Qismlar soni: {len(episodes)}"
     )
     kb = anime_detail_kb(anime, episodes)
-    if anime["poster_file_id"]:
+    poster_type = anime["poster_type"] if "poster_type" in anime.keys() else "photo"
+    if anime["poster_file_id"] and poster_type == "video":
+        await message.answer_video(anime["poster_file_id"], caption=caption, reply_markup=kb, parse_mode="HTML")
+    elif anime["poster_file_id"]:
         await message.answer_photo(anime["poster_file_id"], caption=caption, reply_markup=kb, parse_mode="HTML")
     else:
         await message.answer(caption, reply_markup=kb, parse_mode="HTML")
@@ -32,6 +34,8 @@ async def _render_anime_detail(message: Message, anime_id: int):
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, command: CommandObject):
+    # Har bir /start bosilganda avvalgi FSM holati majburiy tozalanadi —
+    # eski botdagi "narsalar ochilib ketish" xatosini oldini olish uchun.
     await state.clear()
 
     if command.args and command.args.startswith("anime_"):
@@ -82,6 +86,8 @@ async def send_episode(callback: CallbackQuery):
         await callback.answer("Bu qism topilmadi.", show_alert=True)
         return
 
+    # copy_message — faylni qayta yuklamasdan, saqlash kanalidagi asl xabarni foydalanuvchiga
+    # nusxalab yuboradi, shu sababli fayl hajmi cheklovi (50MB) bu yerda ta'sir qilmaydi.
     await callback.bot.copy_message(
         chat_id=callback.from_user.id,
         from_chat_id=config.storage_channel_id,
