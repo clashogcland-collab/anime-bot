@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS animes (
     name TEXT NOT NULL,
     description TEXT,
     poster_file_id TEXT,
+    poster_type TEXT DEFAULT 'photo',
     genre TEXT,
     status TEXT DEFAULT 'davom etmoqda',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -28,15 +29,21 @@ CREATE TABLE IF NOT EXISTS episodes (
 async def init_db() -> None:
     async with aiosqlite.connect(config.database_path) as db:
         await db.executescript(SCHEMA)
-        await db.commit()
+        # Eski bazalarda poster_type ustuni bo'lmasligi mumkin — bo'lmasa qo'shamiz
+        try:
+            await db.execute("ALTER TABLE animes ADD COLUMN poster_type TEXT DEFAULT 'photo'")
+            await db.commit()
+        except Exception:
+            pass
 
 
 async def add_anime(name: str, description: str, poster_file_id: str | None, genre: str,
-                     status: str = "davom etmoqda") -> int:
+                     poster_type: str = "photo", status: str = "davom etmoqda") -> int:
     async with aiosqlite.connect(config.database_path) as db:
         cur = await db.execute(
-            "INSERT INTO animes (name, description, poster_file_id, genre, status) VALUES (?, ?, ?, ?, ?)",
-            (name, description, poster_file_id, genre, status),
+            "INSERT INTO animes (name, description, poster_file_id, poster_type, genre, status) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (name, description, poster_file_id, poster_type, genre, status),
         )
         await db.commit()
         return cur.lastrowid
