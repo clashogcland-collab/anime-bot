@@ -94,3 +94,20 @@ async def get_episode(episode_id: int):
         db.row_factory = aiosqlite.Row
         cur = await db.execute("SELECT * FROM episodes WHERE id = ?", (episode_id,))
         return await cur.fetchone()
+async def save_progress(user_id: int, anime_id: int, episode_id: int) -> None:
+    async with aiosqlite.connect(config.database_path) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO watch_progress (user_id, anime_id, episode_id) VALUES (?, ?, ?)",
+            (user_id, anime_id, episode_id),
+        )
+        await db.commit()
+
+
+async def get_progress(user_id: int, anime_id: int):
+    async with aiosqlite.connect(config.database_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT * FROM watch_progress WHERE user_id = ? AND anime_id = ?",
+            (user_id, anime_id),
+        )
+        return await cur.fetchone()
