@@ -1,7 +1,7 @@
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import database as db
 from config import config
@@ -179,3 +179,11 @@ async def add_episode_video(message: Message, state: FSMContext):
 @router.message(AddEpisode.video)
 async def add_episode_video_invalid(message: Message):
     await message.answer("Iltimos, video fayl yuboring.")
+@router.message(Command("backup"))
+async def backup_db(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer_document(
+        FSInputFile(config.database_path),
+        caption="💾 Baza zaxirasi",
+                            )
