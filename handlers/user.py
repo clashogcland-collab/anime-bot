@@ -1,7 +1,7 @@
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import database as db
 from config import config
@@ -10,7 +10,7 @@ from keyboards import anime_detail_kb, main_menu_kb
 router = Router()
 
 
-async def _render_anime_detail(message: Message, anime_id: int):
+async def _render_anime_detail(message: Message, anime_id: int, user_id: int):
     anime = await db.get_anime(anime_id)
     if not anime:
         await message.answer("Bu anime topilmadi.")
@@ -23,6 +23,24 @@ async def _render_anime_detail(message: Message, anime_id: int):
         f"Qismlar soni: {len(episodes)}"
     )
     kb = anime_detail_kb(anime, episodes)
+
+    # Davom ettirish tugmalari
+    progress = await db.get_progress(user_id, anime_id)
+    if progress:
+        last = next((e for e in episodes if e["id"] == progress["episode_id"]), None)
+        if last:
+            rows = [[InlineKeyboardButton(
+                text=f"▶️ Davom ettirish: {last['episode_number']}-qism",
+                callback_data=f"ep_{last['id']}",
+            )]]
+            nxt = next((e for e in episodes if e["episode_number"] > last["episode_number"]), None)
+            if nxt:
+                rows.append([InlineKeyboardButton(
+                    text=f"⏭ Keyingi qism: {nxt['episode_number']}-qism",
+                    callback_data=f"ep_{nxt['id']}",
+                )])
+            kb = InlineKeyboardMarkup(inline_keyboard=rows + kb.inline_keyboard)
+
     poster_type = anime["poster_type"] if "poster_type" in anime.keys() else "photo"
     if anime["poster_file_id"] and poster_type == "video":
         await message.answer_video(anime["poster_file_id"], caption=caption, reply_markup=kb, parse_mode="HTML")
@@ -34,8 +52,6 @@ async def _render_anime_detail(message: Message, anime_id: int):
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, command: CommandObject):
-    # Har bir /start bosilganda avvalgi FSM holati majburiy tozalanadi —
-    # eski botdagi "narsalar ochilib ketish" xatosini oldini olish uchun.
     await state.clear()
 
     if command.args and command.args.startswith("anime_"):
@@ -44,7 +60,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         except ValueError:
             anime_id = None
         if anime_id:
-            await _render_anime_detail(message, anime_id)
+            await _render_anime_detail(message, anime_id, message.from_user.id)
             return
 
     animes = await db.list_animes()
@@ -74,7 +90,7 @@ async def back_menu(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("anime_"))
 async def show_anime(callback: CallbackQuery):
     anime_id = int(callback.data.split("_", 1)[1])
-    await _render_anime_detail(callback.message, anime_id)
+    await _render_anime_detail(callback.message, anime_id, callback.from_user.id)
     await callback.answer()
 
 
@@ -86,13 +102,12 @@ async def send_episode(callback: CallbackQuery):
         await callback.answer("Bu qism topilmadi.", show_alert=True)
         return
 
-    # copy_message — faylni qayta yuklamasdan, saqlash kanalidagi asl xabarni foydalanuvchiga
-    # nusxalab yuboradi, shu sababli fayl hajmi cheklovi (50MB) bu yerda ta'sir qilmaydi.
     await callback.bot.copy_message(
         chat_id=callback.from_user.id,
         from_chat_id=config.storage_channel_id,
         message_id=episode["storage_message_id"],
     )
+    await db.save_progress(callback.from_user.id, episode["anime_id"], episode_id)
     await callback.answer()
 
 
