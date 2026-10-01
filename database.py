@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS episodes (
     storage_message_id INTEGER,
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (anime_id) REFERENCES animes (id)
+);CREATE TABLE IF NOT EXISTS watch_progress (
+    user_id INTEGER NOT NULL,
+    anime_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, anime_id)
 );
 """
 
