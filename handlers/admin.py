@@ -16,7 +16,10 @@ router = Router()
 def is_admin(user_id: int) -> bool:
     return user_id in config.admin_ids
 
-
+@router.message(Command("cancel"))
+async def cancel_any(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Bekor qilindi. /start orqali menyuga qayting.")
 # ------------------------------------------------------------------
 # ANIME QO'SHISH
 # ------------------------------------------------------------------
