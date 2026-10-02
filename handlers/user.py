@@ -43,6 +43,12 @@ async def _build_kb(anime, episodes, user_id, page):
                     callback_data=f"ep_{nxt['id']}",
                 )])
 
+    fav = await db.is_favorite(user_id, anime["id"])
+    rows.append([InlineKeyboardButton(
+        text="💔 Sevimlilardan olib tashlash" if fav else "❤️ Sevimlilarga qo'shish",
+        callback_data=f"fav_{anime['id']}_{page}",
+    )])
+
     rows += kb.inline_keyboard
 
     if pages > 1:
@@ -114,6 +120,7 @@ async def _deliver_episode(bot, user_id: int, episode):
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, command: CommandObject):
     await state.clear()
+    await db.add_user(message.from_user.id)
 
     if command.args and command.args.startswith("anime_"):
         try:
@@ -131,9 +138,23 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     await message.answer(
         "🎌 Anime botga xush kelibsiz!\n"
         "Ro'yxatdan animeni tanlang yoki nomini yozib qidiring.\n"
-        "Aniq qismni topish uchun nom va raqamni yozing, masalan: One Piece 150",
+        "Aniq qismni topish uchun nom va raqamni yozing, masalan: One Piece 150\n"
+        "❤️ Sevimlilar: /favorites",
         reply_markup=main_menu_kb(animes),
     )
+
+
+@router.message(Command("favorites"))
+async def cmd_favorites(message: Message):
+    await db.add_user(message.from_user.id)
+    favs = await db.list_favorites(message.from_user.id)
+    if not favs:
+        await message.answer(
+            "❤️ Sevimlilar ro'yxati bo'sh.\n"
+            "Animeni ochib, «Sevimlilarga qo'shish» tugmasini bosing."
+        )
+        return
+    await message.answer("❤️ Sevimli animelaringiz:", reply_markup=main_menu_kb(favs))
 
 
 @router.message(Command("cancel"))
@@ -168,72 +189,13 @@ async def change_page(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("anime_"))
-async def show_anime(callback: CallbackQuery):
-    anime_id = int(callback.data.split("_", 1)[1])
-    await _render_anime_detail(callback.message, anime_id, callback.from_user.id)
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("ep_"))
-async def send_episode(callback: CallbackQuery):
-    episode_id = int(callback.data.split("_", 1)[1])
-    episode = await db.get_episode(episode_id)
-    if not episode:
-        await callback.answer("Bu qism topilmadi.", show_alert=True)
+@router.callback_query(F.data.startswith("fav_"))
+async def toggle_fav(callback: CallbackQuery):
+    _, anime_id, page = callback.data.split("_")
+    anime = await db.get_anime(int(anime_id))
+    if not anime:
+        await callback.answer()
         return
-    await _deliver_episode(callback.bot, callback.from_user.id, episode)
-    await callback.answer()
-
-
-@router.callback_query(F.data == "check_sub")
-async def check_sub(callback: CallbackQuery):
-    await callback.answer("Obuna qabul qilindi. Endi /start ni bosing.", show_alert=True)
-
-
-# ------------------------------------------------------------------
-# QIDIRUV: "One Piece 150" yoki "one piece 150-qism" yoki faqat nom
-# ------------------------------------------------------------------
-
-@router.message(F.text, ~F.text.startswith("/"), StateFilter(None))
-async def search_text(message: Message):
-    text = message.text.strip()
-    if not text:
-        return
-    user_id = message.from_user.id
-
-    # 1) butun matn anime nomi bo'lishi mumkin
-    found = await db.search_animes(text)
-    if found:
-        if len(found) == 1:
-            await _render_anime_detail(message, found[0]["id"], user_id)
-        else:
-            await message.answer("🔎 Topilgan animelar:", reply_markup=main_menu_kb(found))
-        return
-
-    # 2) nom + qism raqami
-    m = re.match(r"^(.*?)[\s,]*(\d+)\s*(?:-?\s*qism)?\s*$", text, re.IGNORECASE)
-    if not m or not m.group(1).strip():
-        await message.answer("😕 Hech narsa topilmadi. Anime nomini yozing yoki /start bosing.")
-        return
-    name, number = m.group(1).strip(), int(m.group(2))
-
-    animes = await db.search_animes(name)
-    if not animes:
-        await message.answer("😕 Bunday anime topilmadi. /start orqali ro'yxatni ko'ring.")
-        return
-    if len(animes) > 1:
-        await message.answer("🔎 Bir nechta anime topildi, birini tanlang:", reply_markup=main_menu_kb(animes))
-        return
-
-    anime = animes[0]
+    added = await db.toggle_favorite(callback.from_user.id, anime["id"])
     episodes = await db.get_episodes(anime["id"])
-    episode = next((e for e in episodes if e["episode_number"] == number), None)
-    if not episode:
-        if episodes:
-            lo, hi = episodes[0]["episode_number"], episodes[-1]["episode_number"]
-            await message.answer(f"😕 {anime['name']}: {number}-qism topilmadi. Mavjud qismlar: {lo}–{hi}.")
-        else:
-            await message.answer(f"😕 {anime['name']} uchun hali qismlar qo'shilmagan.")
-        return
-    await _deliver_episode(message.bot, user_id, episode)
+    kb = await _build
