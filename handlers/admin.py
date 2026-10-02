@@ -94,12 +94,7 @@ async def stats(message: Message):
         return
     animes = (await _fetch("SELECT COUNT(*) AS c FROM animes"))[0]["c"]
     eps = (await _fetch("SELECT COUNT(*) AS c FROM episodes"))[0]["c"]
-    users = (await _fetch("SELECT COUNT(*) AS c FROM users"))[0]["c"]
-    today = (await _fetch(
-        "SELECT COUNT(*) AS c FROM users WHERE date(first_seen) = date('now')"
-    ))[0]["c"]
-    watchers = (await _fetch("SELECT COUNT(DISTINCT user_id) AS c FROM watch_progress"))[0]["c"]
-    favs = (await _fetch("SELECT COUNT(*) AS c FROM favorites"))[0]["c"]
+    users = (await _fetch("SELECT COUNT(DISTINCT user_id) AS c FROM watch_progress"))[0]["c"]
     top = await _fetch(
         "SELECT a.name AS name, COUNT(DISTINCT w.user_id) AS c "
         "FROM watch_progress w JOIN animes a ON a.id = w.anime_id "
@@ -107,17 +102,10 @@ async def stats(message: Message):
     )
     text = (
         "📊 Statistika\n\n"
-        f"👥 Foydalanuvchilar: {users} (bugun: +{today})\n"
-        f"▶️ Qism ko'rganlar: {watchers}\n"
-        f"❤️ Sevimlilar soni: {favs}\n"
         f"🎬 Animelar: {animes}\n"
         f"🎞 Qismlar: {eps}\n"
+        f"👥 Qism ko'rgan foydalanuvchilar: {users}\n"
     )
-    if top:
-        text += "\n🔥 Eng ko'p ko'rilganlar:\n"
-        for i, r in enumerate(top, 1):
-            text += f"{i}. {r['name']} — {r['c']} kishi\n"
-    await message.answer(text)
     if top:
         text += "\n🔥 Eng ko'p ko'rilganlar:\n"
         for i, r in enumerate(top, 1):
