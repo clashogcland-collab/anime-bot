@@ -168,7 +168,7 @@ async def add_episode_video(message: Message, state: FSMContext):
 
     # Qism qo'shilganda kanalga qayta post QILINMAYDI — faqat botdagi
     # menyuga qo'shiladi (kanal posti faqat anime birinchi yaratilganda ketadi).
-await state.update_data(episode_number=data["episode_number"] + 1)
+    await state.update_data(episode_number=data["episode_number"] + 1)
     await message.answer(
         f"✅ {data['episode_number']}-qism qo'shildi!\n"
         f"Keyingi videoni yuborsangiz, {data['episode_number'] + 1}-qism bo'ladi.\n"
