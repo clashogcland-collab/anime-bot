@@ -1,5 +1,7 @@
+import re
+
 from aiogram import F, Router
-from aiogram.filters import Command, CommandObject, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -8,6 +10,51 @@ from config import config
 from keyboards import anime_detail_kb, main_menu_kb
 
 router = Router()
+
+PAGE_SIZE = 40
+
+
+def _page_of(episodes, episode_id):
+    for i, e in enumerate(episodes):
+        if e["id"] == episode_id:
+            return i // PAGE_SIZE
+    return 0
+
+
+async def _build_kb(anime, episodes, user_id, page):
+    pages = max(1, (len(episodes) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    chunk = episodes[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    kb = anime_detail_kb(anime, chunk)
+
+    rows = []
+    progress = await db.get_progress(user_id, anime["id"])
+    if progress:
+        last = next((e for e in episodes if e["id"] == progress["episode_id"]), None)
+        if last:
+            rows.append([InlineKeyboardButton(
+                text=f"▶️ Davom ettirish: {last['episode_number']}-qism",
+                callback_data=f"ep_{last['id']}",
+            )])
+            nxt = next((e for e in episodes if e["episode_number"] > last["episode_number"]), None)
+            if nxt:
+                rows.append([InlineKeyboardButton(
+                    text=f"⏭ Keyingi qism: {nxt['episode_number']}-qism",
+                    callback_data=f"ep_{nxt['id']}",
+                )])
+
+    rows += kb.inline_keyboard
+
+    if pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="◀️ Oldingi", callback_data=f"pg_{anime['id']}_{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="noop"))
+        if page < pages - 1:
+            nav.append(InlineKeyboardButton(text="Keyingi ▶️", callback_data=f"pg_{anime['id']}_{page + 1}"))
+        rows.append(nav)
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _render_anime_detail(message: Message, anime_id: int, user_id: int):
@@ -20,26 +67,15 @@ async def _render_anime_detail(message: Message, anime_id: int, user_id: int):
         f"<b>{anime['name']}</b>\n\n"
         f"Janr: {anime['genre'] or '-'}\n"
         f"Holat: {anime['status']}\n"
-        f"Qismlar soni: {len(episodes)}"
+        f"Qismlar soni: {len(episodes)}\n\n"
+        f"🔎 Qismni topish: nom va raqamni yozing, masalan: {anime['name']} 5"
     )
-    kb = anime_detail_kb(anime, episodes)
 
-    # Davom ettirish tugmalari
+    page = 0
     progress = await db.get_progress(user_id, anime_id)
     if progress:
-        last = next((e for e in episodes if e["id"] == progress["episode_id"]), None)
-        if last:
-            rows = [[InlineKeyboardButton(
-                text=f"▶️ Davom ettirish: {last['episode_number']}-qism",
-                callback_data=f"ep_{last['id']}",
-            )]]
-            nxt = next((e for e in episodes if e["episode_number"] > last["episode_number"]), None)
-            if nxt:
-                rows.append([InlineKeyboardButton(
-                    text=f"⏭ Keyingi qism: {nxt['episode_number']}-qism",
-                    callback_data=f"ep_{nxt['id']}",
-                )])
-            kb = InlineKeyboardMarkup(inline_keyboard=rows + kb.inline_keyboard)
+        page = _page_of(episodes, progress["episode_id"])
+    kb = await _build_kb(anime, episodes, user_id, page)
 
     poster_type = anime["poster_type"] if "poster_type" in anime.keys() else "photo"
     if anime["poster_file_id"] and poster_type == "video":
@@ -48,6 +84,31 @@ async def _render_anime_detail(message: Message, anime_id: int, user_id: int):
         await message.answer_photo(anime["poster_file_id"], caption=caption, reply_markup=kb, parse_mode="HTML")
     else:
         await message.answer(caption, reply_markup=kb, parse_mode="HTML")
+
+
+async def _deliver_episode(bot, user_id: int, episode):
+    episodes = await db.get_episodes(episode["anime_id"])
+    idx = next((i for i, e in enumerate(episodes) if e["id"] == episode["id"]), 0)
+
+    nav = []
+    if idx > 0:
+        prev = episodes[idx - 1]
+        nav.append(InlineKeyboardButton(text=f"⏮ {prev['episode_number']}-qism", callback_data=f"ep_{prev['id']}"))
+    if idx < len(episodes) - 1:
+        nxt = episodes[idx + 1]
+        nav.append(InlineKeyboardButton(text=f"{nxt['episode_number']}-qism ⏭", callback_data=f"ep_{nxt['id']}"))
+    rows = []
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="📋 Qismlar ro'yxati", callback_data=f"anime_{episode['anime_id']}")])
+
+    await bot.copy_message(
+        chat_id=user_id,
+        from_chat_id=config.storage_channel_id,
+        message_id=episode["storage_message_id"],
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await db.save_progress(user_id, episode["anime_id"], episode["id"])
 
 
 @router.message(CommandStart())
@@ -68,7 +129,9 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         await message.answer("Hozircha animelar mavjud emas. Tez orada qo'shiladi!")
         return
     await message.answer(
-        "🎌 Anime botga xush kelibsiz!\nQuyidagi ro'yxatdan animeni tanlang:",
+        "🎌 Anime botga xush kelibsiz!\n"
+        "Ro'yxatdan animeni tanlang yoki nomini yozib qidiring.\n"
+        "Aniq qismni topish uchun nom va raqamni yozing, masalan: One Piece 150",
         reply_markup=main_menu_kb(animes),
     )
 
@@ -87,6 +150,24 @@ async def back_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(F.data == "noop")
+async def noop(callback: CallbackQuery):
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pg_"))
+async def change_page(callback: CallbackQuery):
+    _, anime_id, page = callback.data.split("_")
+    anime = await db.get_anime(int(anime_id))
+    if not anime:
+        await callback.answer()
+        return
+    episodes = await db.get_episodes(anime["id"])
+    kb = await _build_kb(anime, episodes, callback.from_user.id, int(page))
+    await callback.message.edit_reply_markup(reply_markup=kb)
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("anime_"))
 async def show_anime(callback: CallbackQuery):
     anime_id = int(callback.data.split("_", 1)[1])
@@ -101,16 +182,58 @@ async def send_episode(callback: CallbackQuery):
     if not episode:
         await callback.answer("Bu qism topilmadi.", show_alert=True)
         return
-
-    await callback.bot.copy_message(
-        chat_id=callback.from_user.id,
-        from_chat_id=config.storage_channel_id,
-        message_id=episode["storage_message_id"],
-    )
-    await db.save_progress(callback.from_user.id, episode["anime_id"], episode_id)
+    await _deliver_episode(callback.bot, callback.from_user.id, episode)
     await callback.answer()
 
 
 @router.callback_query(F.data == "check_sub")
 async def check_sub(callback: CallbackQuery):
     await callback.answer("Obuna qabul qilindi. Endi /start ni bosing.", show_alert=True)
+
+
+# ------------------------------------------------------------------
+# QIDIRUV: "One Piece 150" yoki "one piece 150-qism" yoki faqat nom
+# ------------------------------------------------------------------
+
+@router.message(F.text, ~F.text.startswith("/"), StateFilter(None))
+async def search_text(message: Message):
+    text = message.text.strip()
+    if not text:
+        return
+    user_id = message.from_user.id
+
+    # 1) butun matn anime nomi bo'lishi mumkin
+    found = await db.search_animes(text)
+    if found:
+        if len(found) == 1:
+            await _render_anime_detail(message, found[0]["id"], user_id)
+        else:
+            await message.answer("🔎 Topilgan animelar:", reply_markup=main_menu_kb(found))
+        return
+
+    # 2) nom + qism raqami
+    m = re.match(r"^(.*?)[\s,]*(\d+)\s*(?:-?\s*qism)?\s*$", text, re.IGNORECASE)
+    if not m or not m.group(1).strip():
+        await message.answer("😕 Hech narsa topilmadi. Anime nomini yozing yoki /start bosing.")
+        return
+    name, number = m.group(1).strip(), int(m.group(2))
+
+    animes = await db.search_animes(name)
+    if not animes:
+        await message.answer("😕 Bunday anime topilmadi. /start orqali ro'yxatni ko'ring.")
+        return
+    if len(animes) > 1:
+        await message.answer("🔎 Bir nechta anime topildi, birini tanlang:", reply_markup=main_menu_kb(animes))
+        return
+
+    anime = animes[0]
+    episodes = await db.get_episodes(anime["id"])
+    episode = next((e for e in episodes if e["episode_number"] == number), None)
+    if not episode:
+        if episodes:
+            lo, hi = episodes[0]["episode_number"], episodes[-1]["episode_number"]
+            await message.answer(f"😕 {anime['name']}: {number}-qism topilmadi. Mavjud qismlar: {lo}–{hi}.")
+        else:
+            await message.answer(f"😕 {anime['name']} uchun hali qismlar qo'shilmagan.")
+        return
+    await _deliver_episode(message.bot, user_id, episode)
