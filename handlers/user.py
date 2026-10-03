@@ -198,10 +198,92 @@ async def toggle_fav(callback: CallbackQuery):
         return
     added = await db.toggle_favorite(callback.from_user.id, anime["id"])
     episodes = await db.get_episodes(anime["id"])
-    kb = await _build
-    @router.callback_query(F.data.startswith("ep_"))
+    kb = await _build_kb(anime, episodes, callback.from_user.id, int(page))
+    await callback.message.edit_reply_markup(reply_markup=kb)
+    await callback.answer("❤️ Sevimlilarga qo'shildi" if added else "Sevimlilardan olib tashlandi")
+
+
+@router.callback_query(F.data.startswith("anime_"))
+async def show_anime(callback: CallbackQuery):
+    anime_id = int(callback.data.split("_", 1)[1])
+    await _render_anime_detail(callback.message, anime_id, callback.from_user.id)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("ep_"))
 async def send_episode(callback: CallbackQuery):
-    @router.errors()
+    episode_id = int(callback.data.split("_", 1)[1])
+    episode = await db.get_episode(episode_id)
+    if not episode:
+        await callback.answer("Bu qism topilmadi.", show_alert=True)
+        return
+    try:
+        await _deliver_episode(callback.bot, callback.from_user.id, episode)
+    except Exception as e:
+        await callback.message.answer(f"⚠️ Qismni yuborishda xatolik: {e}")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "check_sub")
+async def check_sub(callback: CallbackQuery):
+    await callback.answer("Obuna qabul qilindi. Endi /start ni bosing.", show_alert=True)
+
+
+# ------------------------------------------------------------------
+# QIDIRUV: "One Piece 150" yoki "one piece 150-qism" yoki faqat nom
+# ------------------------------------------------------------------
+
+@router.message(F.text, ~F.text.startswith("/"), StateFilter(None))
+async def search_text(message: Message):
+    text = message.text.strip()
+    if not text:
+        return
+    user_id = message.from_user.id
+    await db.add_user(user_id)
+
+    found = await db.search_animes(text)
+    if found:
+        if len(found) == 1:
+            await _render_anime_detail(message, found[0]["id"], user_id)
+        else:
+            await message.answer("🔎 Topilgan animelar:", reply_markup=main_menu_kb(found))
+        return
+
+    m = re.match(r"^(.*?)[\s,]*(\d+)\s*(?:-?\s*qism)?\s*$", text, re.IGNORECASE)
+    if not m or not m.group(1).strip():
+        await message.answer("😕 Hech narsa topilmadi. Anime nomini yozing yoki /start bosing.")
+        return
+    name, number = m.group(1).strip(), int(m.group(2))
+
+    animes = await db.search_animes(name)
+    if not animes:
+        await message.answer("😕 Bunday anime topilmadi. /start orqali ro'yxatni ko'ring.")
+        return
+    if len(animes) > 1:
+        await message.answer("🔎 Bir nechta anime topildi, birini tanlang:", reply_markup=main_menu_kb(animes))
+        return
+
+    anime = animes[0]
+    episodes = await db.get_episodes(anime["id"])
+    episode = next((e for e in episodes if e["episode_number"] == number), None)
+    if not episode:
+        if episodes:
+            lo, hi = episodes[0]["episode_number"], episodes[-1]["episode_number"]
+            await message.answer(f"😕 {anime['name']}: {number}-qism topilmadi. Mavjud qismlar: {lo}–{hi}.")
+        else:
+            await message.answer(f"😕 {anime['name']} uchun hali qismlar qo'shilmagan.")
+        return
+    try:
+        await _deliver_episode(message.bot, user_id, episode)
+    except Exception as e:
+        await message.answer(f"⚠️ Qismni yuborishda xatolik: {e}")
+
+
+# ------------------------------------------------------------------
+# XATOLARNI ADMINGA YUBORISH
+# ------------------------------------------------------------------
+
+@router.errors()
 async def report_error(event: ErrorEvent, bot: Bot):
     text = f"⚠️ Xato: {type(event.exception).__name__}: {event.exception}"[:3500]
     for admin_id in config.admin_ids:
