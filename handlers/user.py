@@ -1,9 +1,9 @@
 import re
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, ErrorEvent, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import database as db
 from config import config
@@ -201,3 +201,12 @@ async def toggle_fav(callback: CallbackQuery):
     kb = await _build
     @router.callback_query(F.data.startswith("ep_"))
 async def send_episode(callback: CallbackQuery):
+    @router.errors()
+async def report_error(event: ErrorEvent, bot: Bot):
+    text = f"⚠️ Xato: {type(event.exception).__name__}: {event.exception}"[:3500]
+    for admin_id in config.admin_ids:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception:
+            pass
+    return True
