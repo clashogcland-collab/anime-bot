@@ -1,3 +1,5 @@
+import os
+from aiohttp import web
 import asyncio
 import logging
 
@@ -9,7 +11,13 @@ import database as db
 from config import config
 from handlers import admin, user
 from middlewares.subscribe import SubscribeMiddleware
-
+async def start_web():
+    app = web.Application()
+    app.router.add_get("/", lambda r: web.Response(text="Bot ishlayapti"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080)))
+    await site.start()
 
 async def main():
     logging.basicConfig(level=logging.INFO)
@@ -18,7 +26,7 @@ async def main():
         raise RuntimeError("BOT_TOKEN sozlanmagan (.env faylni tekshiring)")
 
     await db.init_db()
-
+    await start_web()
     session = None
     if config.bot_api_base and "api.telegram.org" not in config.bot_api_base:
         local_server = TelegramAPIServer.from_base(config.bot_api_base)
