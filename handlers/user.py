@@ -199,3 +199,5 @@ async def toggle_fav(callback: CallbackQuery):
     added = await db.toggle_favorite(callback.from_user.id, anime["id"])
     episodes = await db.get_episodes(anime["id"])
     kb = await _build
+    @router.callback_query(F.data.startswith("ep_"))
+async def send_episode(callback: CallbackQuery):
